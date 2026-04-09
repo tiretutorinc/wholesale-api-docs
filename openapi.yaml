@@ -1,0 +1,828 @@
+openapi: 3.0.3
+info:
+  title: TireTutor Wholesale API
+  version: "1.0.0"
+  description: >
+    REST API that enables third-party systems (e.g., PartsTech) to search tires and place orders
+    on behalf of a TireTutor wholesale user.
+
+    Authentication uses a partner + user credential exchange to obtain a short-lived TireTutor-issued
+    bearer access token. The token is signed by TireTutor and should be treated as opaque by clients.
+
+    This API does not implement an interactive consent flow: the wholesale user obtains their user_id
+    and user_key from the TireTutor Wholesale Portal and provides them to the third-party system out-of-band.
+
+servers:
+  - url: https://backend-blue.production.tiretutor.dev/integrations/wholesale_api/v1
+    description: Production
+  - url: https://backend-green.staging.tiretutor.dev/integrations/wholesale_api/v1
+    description: Sandbox
+
+tags:
+  - name: Auth
+  - name: Catalog
+  - name: Purchasing
+
+security:
+  - bearerAuth: []
+
+paths:
+  /authorize:
+    post:
+      tags: [Auth]
+      summary: Exchange partner + user credentials for an access token
+      description: >
+        Issues a short-lived bearer access token. The token must be used as
+        `Authorization: Bearer <token>` when calling business endpoints.
+
+        The token is generated and signed by TireTutor. Clients should treat it as opaque.
+
+        This API does not implement an interactive consent flow. The wholesale user obtains
+        `user_id` and `user_key` from the TireTutor Wholesale Portal and provides them
+        to the third-party system out-of-band.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeRequest'
+            examples:
+              example:
+                value:
+                  credentials:
+                    partner:
+                      id: "pt_partner_123"
+                      key: "pt_partner_key_secret"
+                    user:
+                      id: "user_987"
+                      key: "user_key_secret"
+      responses:
+        "200":
+          description: Access token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorizeResponse'
+              examples:
+                example:
+                  value:
+                    token_type: "Bearer"
+                    access_token: "ZXlKd1lYSjBibVZ5WDJsa0lqb2ljSFJmY0dGeWRHNWxjbDh4TWpNaUxDSjFjMlZ5WDJsa0lqb2lkWE5sY2w4NU9EY2lMQ0p1YjI1alpTSTZJbVJ2YzJWaGJDSjk..."
+                    expires_in: 3600
+        "400":
+          description: Bad request (e.g., missing credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                example:
+                  value:
+                    code: "invalid_request"
+                    message: "Missing required field: credentials"
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+
+  /catalog/tires/search:
+    get:
+      tags: [Catalog]
+      summary: Search tires by SKU or size
+      description: >
+        Search tires available for the authenticated wholesale user context.
+
+        At least one of the following search modes is required:
+        - `sku`
+        - `width` + `rim_diameter`
+
+        `aspect_ratio` is optional and may be used to further refine a size-based search,
+        but it is not supported as a standalone search field.
+
+        Pagination uses `offset` and an opaque `next` value in the response.
+      parameters:
+        - name: sku
+          in: query
+          required: false
+          schema:
+            type: string
+          description: SKU search (exact or partial, implementation-defined)
+        - name: width
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 225
+          description: Tire width (e.g., 225)
+        - name: aspect_ratio
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 45
+          description: Optional tire aspect ratio used to refine a size search
+        - name: rim_diameter
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 17
+          description: Rim diameter (e.g., 17)
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Pagination offset (opaque)
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Number of items to return. The implementation currently caps this at 20.
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TireSearchResponse'
+        "400":
+          description: >
+            Bad request (e.g., none of the required search parameters were provided).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_search_params:
+                  value:
+                    code: "invalid_request"
+                    message: "At least one search parameter is required: sku, width, aspect_ratio, rim_diameter"
+                invalid_size_search:
+                  value:
+                    code: "invalid_request"
+                    message: "Size search requires both width and rim_diameter"
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+
+  /catalog/tires/{product_id}:
+    get:
+      tags: [Catalog]
+      summary: Get tire details by product_id
+      description: >
+        Returns tire details for a given `product_id`.
+
+        The `product_id` is an internal TireTutor identifier returned by catalog endpoints.
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tire details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TireDetails'
+        "400":
+          description: Bad request (e.g., invalid product_id format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                example:
+                  value:
+                    code: "invalid_request"
+                    message: "Invalid product_id"
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /purchasing/preview:
+    post:
+      tags: [Purchasing]
+      summary: Preview purchase
+      description: >
+        Returns pricing breakdown, taxes (if applicable), and availability for a proposed purchase.
+        Does not create an order.
+
+        Note: HTTP 400 may represent a generic bad request OR business validation issues such as
+        out-of-stock, invalid product_id, or price changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewPurchaseRequest'
+            examples:
+              example:
+                value:
+                  cart:
+                    - product_id: "prod_123"
+                      quantity: 4
+      responses:
+        "200":
+          description: Preview purchase
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreviewPurchaseResponse'
+        "400":
+          description: >
+            Bad request or purchase cannot be previewed (e.g., out-of-stock, invalid product_id, price changed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missing_cart:
+                  value:
+                    code: "invalid_request"
+                    message: "Missing required field: cart"
+                out_of_stock:
+                  value:
+                    code: "out_of_stock"
+                    message: "One or more items are out of stock"
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+
+  /purchasing/purchase:
+    post:
+      tags: [Purchasing]
+      summary: Make purchase
+      description: >
+        Creates an order for the authenticated wholesale user context.
+
+        This endpoint should be called with an Idempotency-Key header to prevent duplicate orders.
+
+        Note: HTTP 400 may represent a generic bad request OR business validation issues such as
+        out-of-stock, invalid product_id, price changes, or duplicate requests.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Optional idempotency key to safely retry purchase requests.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MakePurchaseRequest'
+            examples:
+              example:
+                value:
+                  po_number: "PT-PO-10001"
+                  note: "Leave at front desk"
+                  cart:
+                    - product_id: "prod_123"
+                      quantity: 4
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MakePurchaseResponse'
+        "400":
+          description: >
+            Bad request or purchase cannot be completed (e.g., out-of-stock, invalid product_id, price changed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalid_product:
+                  value:
+                    code: "invalid_product"
+                    message: "One or more product_ids are invalid"
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+
+  /orders/{order_id}:
+    get:
+      tags: [Purchasing]
+      summary: Get order details
+      description: >
+        Returns details for an order created via this API (or otherwise visible to the authenticated context).
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        "401":
+          $ref: '#/components/responses/UnauthorizedNoMessage'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: TireTutor-issued short-lived signed bearer access token
+
+  responses:
+    UnauthorizedNoMessage:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnauthorizedError'
+          examples:
+            example:
+              value:
+                code: "unauthorized"
+
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            example:
+              value:
+                code: "not_found"
+                message: "Resource not found"
+
+  schemas:
+    UnauthorizedError:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          example: "unauthorized"
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: "invalid_request"
+        message:
+          type: string
+          example: "Missing required field: credentials"
+        details:
+          type: object
+          additionalProperties: true
+
+    PartnerCredentials:
+      type: object
+      required: [id, key]
+      properties:
+        id:
+          type: string
+          description: Partner/developer identifier
+        key:
+          type: string
+          description: Partner/developer secret key
+
+    UserCredentials:
+      type: object
+      required: [id, key]
+      properties:
+        id:
+          type: string
+          description: TireTutor wholesale user identifier
+        key:
+          type: string
+          description: TireTutor wholesale user secret key (provided out-of-band)
+
+    AuthorizeRequest:
+      type: object
+      required: [credentials]
+      properties:
+        credentials:
+          type: object
+          required: [partner, user]
+          properties:
+            partner:
+              $ref: '#/components/schemas/PartnerCredentials'
+            user:
+              $ref: '#/components/schemas/UserCredentials'
+
+    AuthorizeResponse:
+      type: object
+      required: [token_type, access_token, expires_in]
+      properties:
+        token_type:
+          type: string
+          example: "Bearer"
+        access_token:
+          type: string
+          description: TireTutor-issued signed bearer access token. Treat as opaque.
+        expires_in:
+          type: integer
+          example: 3600
+
+    TireSize:
+      type: object
+      properties:
+        width:
+          type: number
+          nullable: true
+          example: 225
+        aspect_ratio:
+          type: number
+          nullable: true
+          example: 45
+        rim_diameter:
+          type: number
+          nullable: true
+          example: 17
+
+    TireSizeDetails:
+      allOf:
+        - $ref: '#/components/schemas/TireSize'
+        - type: object
+          properties:
+            construction:
+              type: string
+              nullable: true
+              example: "R"
+            load_index:
+              type: integer
+              nullable: true
+              example: 94
+            speed_rating:
+              type: string
+              nullable: true
+              example: "W"
+
+    AvailabilityEntry:
+      type: object
+      required: [location_name, availability]
+      properties:
+        location_name:
+          type: string
+          example: "Main Warehouse"
+        availability:
+          type: integer
+          example: 12
+
+    Money:
+      type: object
+      required: [currency, amount]
+      properties:
+        currency:
+          type: string
+          example: "USD"
+        amount:
+          type: number
+          format: float
+          example: 125.0
+
+    Utqg:
+      type: object
+      properties:
+        tread_wear:
+          type: string
+          nullable: true
+          example: "640"
+        traction:
+          type: string
+          nullable: true
+          example: "A"
+        temperature:
+          type: string
+          nullable: true
+          example: "A"
+
+    Warranty:
+      type: object
+      properties:
+        mileage_miles:
+          type: integer
+          nullable: true
+          example: 60000
+        road_hazard:
+          type: boolean
+          example: true
+
+    TireSpecs:
+      type: object
+      properties:
+        run_flat:
+          type: boolean
+          nullable: true
+        upc:
+          type: string
+          nullable: true
+          example: "123456789012"
+        load_range:
+          type: string
+          nullable: true
+          example: "XL"
+        sidewall:
+          type: string
+          nullable: true
+          example: "BW"
+        tread_depth:
+          type: string
+          nullable: true
+          example: "10"
+        minimum_rim_width:
+          type: number
+          format: float
+          nullable: true
+          example: 7.0
+        measured_rim_width:
+          type: number
+          format: float
+          nullable: true
+          example: 7.5
+        maximum_rim_width:
+          type: number
+          format: float
+          nullable: true
+          example: 8.5
+        three_peak_mountain_snowflake:
+          type: boolean
+          nullable: true
+        mud_and_snow:
+          type: boolean
+          nullable: true
+        tread_marking:
+          type: string
+          nullable: true
+          example: "ASY"
+        ply_rating:
+          type: integer
+          nullable: true
+          example: 4
+        single_max_load:
+          type: integer
+          nullable: true
+          example: 1477
+        single_max_psi:
+          type: integer
+          nullable: true
+          example: 51
+        load_index_dual:
+          type: string
+          nullable: true
+        dual_max_load:
+          type: integer
+          nullable: true
+        dual_max_psi:
+          type: integer
+          nullable: true
+        tire_position:
+          type: string
+          nullable: true
+        embedded_speed:
+          type: string
+          nullable: true
+        tire_weight:
+          type: number
+          format: float
+          nullable: true
+          example: 24
+        tire_diameter:
+          type: string
+          nullable: true
+          example: "24.97"
+        revs_per_mile:
+          type: string
+          nullable: true
+          example: "835"
+
+    TireSummary:
+      type: object
+      required:
+        - product_id
+        - sku
+        - brand
+        - size
+        - price
+        - availabilities
+        - availability_status
+        - image_url
+      properties:
+        product_id:
+          type: string
+          description: Internal TireTutor product identifier
+          example: "prod_123"
+        sku:
+          type: string
+          example: "SKU-123"
+        brand:
+          type: string
+          example: "Michelin"
+        size:
+          $ref: '#/components/schemas/TireSize'
+        description:
+          type: string
+          nullable: true
+          example: "All-season tire with enhanced wet traction"
+        price:
+          $ref: '#/components/schemas/Money'
+        availabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailabilityEntry'
+        availability_status:
+          type: string
+          description: >
+            Status of the availability lookup. For example, `OK` when live availability
+            was fetched successfully, or `FAILED_TO_FETCH` when availability data could not be retrieved.
+          example: "OK"
+        image_url:
+          type: string
+          format: uri
+          example: "https://cdn.tiretutor.com/images/prod_123.jpg"
+
+    TireDetails:
+      allOf:
+        - $ref: '#/components/schemas/TireSummary'
+        - type: object
+          properties:
+            model:
+              type: string
+              nullable: true
+              example: "Defender 2"
+            features:
+              type: string
+              nullable: true
+              example: "Quiet ride and long tread life"
+            size:
+              $ref: '#/components/schemas/TireSizeDetails'
+            utqg:
+              $ref: '#/components/schemas/Utqg'
+            warranty:
+              $ref: '#/components/schemas/Warranty'
+            specs:
+              $ref: '#/components/schemas/TireSpecs'
+
+    TireSearchResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TireSummary'
+        next:
+          type: string
+          nullable: true
+          description: Next pagination offset (opaque)
+
+    CartItem:
+      type: object
+      required: [product_id, quantity]
+      properties:
+        product_id:
+          type: string
+          example: "prod_123"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 4
+
+    PreviewPurchaseRequest:
+      type: object
+      required: [cart]
+      properties:
+        cart:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CartItem'
+
+    PreviewPurchaseLineItem:
+      type: object
+      required: [product_id, quantity, unit_price, unit_tax, line_total]
+      properties:
+        product_id:
+          type: string
+          example: "prod_123"
+        quantity:
+          type: integer
+          example: 4
+        unit_price:
+          $ref: '#/components/schemas/Money'
+        unit_tax:
+          $ref: '#/components/schemas/Money'
+        line_total:
+          $ref: '#/components/schemas/Money'
+
+    PreviewPurchaseResponse:
+      type: object
+      required: [cart, totals, estimated_delivery]
+      properties:
+        cart:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewPurchaseLineItem'
+        totals:
+          type: object
+          required: [subtotal, taxes, total]
+          properties:
+            subtotal:
+              $ref: '#/components/schemas/Money'
+            taxes:
+              $ref: '#/components/schemas/Money'
+            total:
+              $ref: '#/components/schemas/Money'
+        estimated_delivery:
+          type: string
+          format: date
+          nullable: true
+          example: "2026-01-20"
+
+    MakePurchaseRequest:
+      type: object
+      required: [cart]
+      properties:
+        po_number:
+          type: string
+          description: Optional PO number provided by the partner
+          example: "PT-PO-10001"
+        note:
+          type: string
+          description: Optional note passed through to the downstream marketplace purchase interface
+          example: "Leave at front desk"
+        cart:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CartItem'
+
+    MakePurchaseResponse:
+      type: object
+      required: [order_id]
+      properties:
+        order_id:
+          type: string
+          example: "ord_abc123"
+        po_number:
+          type: string
+          nullable: true
+          example: "PT-PO-10001"
+
+    OrderItem:
+      type: object
+      required: [product_id, sku, brand, quantity]
+      properties:
+        product_id:
+          type: string
+          example: "prod_123"
+        sku:
+          type: string
+          example: "SKU-123"
+        brand:
+          type: string
+          example: "Michelin"
+        quantity:
+          type: integer
+          example: 4
+
+    Order:
+      type: object
+      required: [order_id, status, created_at, items, totals]
+      properties:
+        order_id:
+          type: string
+          example: "ord_abc123"
+        status:
+          type: string
+          example: "created"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-01-15T12:00:00Z"
+        po_number:
+          type: string
+          nullable: true
+          example: "PT-PO-10001"
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        totals:
+          type: object
+          required: [subtotal, taxes, total]
+          properties:
+            subtotal:
+              $ref: '#/components/schemas/Money'
+            taxes:
+              $ref: '#/components/schemas/Money'
+            total:
+              $ref: '#/components/schemas/Money'
