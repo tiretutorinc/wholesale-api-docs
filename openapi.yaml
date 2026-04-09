@@ -13,9 +13,7 @@ info:
     and user_key from the TireTutor Wholesale Portal and provides them to the third-party system out-of-band.
 
 servers:
-  - url: https://backend-blue.production.tiretutor.dev/integrations/wholesale_api/v1
-    description: Production
-  - url: https://backend-green.staging.tiretutor.dev/integrations/wholesale_api/v1
+  - url: https://staging-wholesale-api.tiretutor.dev/v1
     description: Sandbox
 
 tags:
