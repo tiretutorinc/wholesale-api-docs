@@ -5,10 +5,11 @@ info:
   description: |
     **The infrastructure layer for programmatic tire commerce.**
 
-    The TireTutor Wholesale API lets third-party platforms (e.g., PartsTech) plug directly into
-    TireTutor's wholesale catalog and ordering flow to search tires, preview live pricing and
-    availability, and place orders on behalf of a TireTutor wholesale user. One integration surface,
-    machine-to-machine ordering, built for partners to scale on.
+    The TireTutor Wholesale API is the integration layer that lets third-party platforms
+    (e.g., PartsTech) plug directly into TireTutor's wholesale catalog and ordering flow —
+    searching tires, previewing live pricing and availability, and placing orders programmatically
+    on behalf of a TireTutor wholesale user. One integration surface, machine-to-machine ordering,
+    built for partners to scale on.
 
     Authentication uses a partner + user credential exchange to obtain a short-lived TireTutor-issued
     bearer access token. The token is signed by TireTutor and should be treated as opaque by clients.
