@@ -22,7 +22,7 @@ This API does not use an interactive consent flow. The wholesale user obtains th
 Sandbox:
 
 ```text
-https://staging-wholesale-api.tiretutor.dev/v1
+https://wholesale-api.staging.tiretutor.dev/v1
 ```
 
 ## Authentication
