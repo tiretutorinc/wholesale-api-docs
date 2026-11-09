@@ -18,7 +18,7 @@ info:
     and user_key from the TireTutor Wholesale Portal and provides them to the third-party system out-of-band.
 
 servers:
-  - url: https://staging-wholesale-api.tiretutor.dev/v1
+  - url: https://wholesale-api.staging.tiretutor.dev/v1
     description: Sandbox
 
 tags:
